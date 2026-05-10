@@ -1,0 +1,11 @@
+[versions]
+agp = "8.13.1"
+xposed = "82"
+android-cache-fix = "3.0.3"
+
+[libraries]
+xposed-api = { module = "de.robv.android.xposed:api", version.ref = "xposed" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-cache-fix = { id = "org.gradle.android.cache-fix", version.ref = "android-cache-fix" }

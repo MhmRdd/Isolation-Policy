@@ -1,0 +1,96 @@
+name: build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      KEYSTORE: ${{ secrets.KEYSTORE }}
+      KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+      KEYPASS: ${{ secrets.KEYPASS }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: set up jdk 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: cache android sdk
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.android/cache
+            ${{ env.ANDROID_HOME }}/platforms
+            ${{ env.ANDROID_HOME }}/build-tools
+          key: android-sdk-${{ hashFiles('gradle/libs.versions.toml', 'app/build.gradle.kts') }}
+          restore-keys: android-sdk-
+
+      - name: setup android sdk
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'tools platform-tools platforms;android-36 build-tools;36.0.0'
+
+      - name: setup gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: decode keystore
+        if: ${{ env.KEYSTORE != '' }}
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: assemble
+        run: ./gradlew :app:assembleRelease :app:assembleDebug
+
+      - name: stage apks
+        id: stage
+        run: |
+          rel=$(find app/build/outputs/apk/release -name '*.apk' | head -n 1)
+          dbg=$(find app/build/outputs/apk/debug   -name '*.apk' | head -n 1)
+          mkdir -p "$RUNNER_TEMP/out"
+          cp "$rel" "$RUNNER_TEMP/out/IsolPolicy-release.apk"
+          cp "$dbg" "$RUNNER_TEMP/out/IsolPolicy-debug.apk"
+          {
+            echo "release=$RUNNER_TEMP/out/IsolPolicy-release.apk"
+            echo "debug=$RUNNER_TEMP/out/IsolPolicy-debug.apk"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: rolling release (main)
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2.6.2
+        with:
+          tag_name: latest
+          name: Latest build (main)
+          prerelease: true
+          files: |
+            ${{ steps.stage.outputs.release }}
+            ${{ steps.stage.outputs.debug }}
+          body: |
+            Auto-built from `${{ github.sha }}`.
+            Release APK signed with `KEYSTORE` secret when present, debug otherwise.
+            Debug APK signed with the platform debug key.
+
+      - name: tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2.6.2
+        with:
+          files: |
+            ${{ steps.stage.outputs.release }}
+            ${{ steps.stage.outputs.debug }}
+          generate_release_notes: true
