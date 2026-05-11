@@ -40,13 +40,7 @@ public class BindHook {
                     }
                     if (hr == null || pr == null) return;
 
-                    Object usesAppZygote;
-                    try {
-                        usesAppZygote = XposedHelpers.callMethod(hr, "usesAppZygote");
-                    } catch (Throwable t) {
-                        return;
-                    }
-                    if (!Boolean.TRUE.equals(usesAppZygote)) return;
+                    if (!usesAppZygote(hr)) return;
 
                     String pkg = resolvePackage(pr);
                     if (pkg == null) return;
@@ -74,6 +68,19 @@ public class BindHook {
         } catch (Throwable ignored) {
         }
         return null;
+    }
+
+    private static boolean usesAppZygote(Object hostingRecord) {
+        try {
+            Object result = XposedHelpers.callMethod(hostingRecord, "usesAppZygote");
+            if (result instanceof Boolean) return ((Boolean) result).booleanValue();
+        } catch (Throwable ignored) {
+        }
+        try {
+            return XposedHelpers.getIntField(hostingRecord, "mHostingZygote") == 2;
+        } catch (Throwable ignored) {
+        }
+        return false;
     }
 
     private static boolean isDenied(String pkg) {
